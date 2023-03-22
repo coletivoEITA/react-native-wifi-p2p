@@ -17,62 +17,50 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 
 /**
- * Created by kiryl on 18.7.18. 
- * Refactor by viniciuscb on 20.03.23 
+ * Created by kiryl on 18.7.18. Refactor by viniciuscb on 20.03.23
  *
- * A simple server socket that accepts connection and writes
- * some data on the stream.
+ * <p>A simple server socket that accepts connection and writes some data on the stream.
  */
 public class MessageServer {
   private static final String TAG = "RNWiFiP2P";
-  private Callback callback;
   private final Executor executor;
   private volatile ServerSocket serverSocket;
-  private volatile boolean returnMeta = false;
 
   public MessageServer() {
-    this(Executors.newSingleThreadExecutor());
-  }
-
-  public MessageServer(Executor executor) {
-    this.executor = executor;
+    this.executor = Executors.newSingleThreadExecutor();
   }
 
   public void start(ReadableMap props, Callback callback) {
     executor.execute(
         () -> {
           try {
+            Boolean returnMeta = false;
             serverSocket = new ServerSocket(8988);
             Log.i(TAG, "Server: Socket opened");
-            this.callback = callback;
 
             if (props != null) {
               Bundle bundle = Arguments.toBundle(props);
-              this.returnMeta = bundle.getBoolean("meta");
+              returnMeta = bundle.getBoolean("meta");
+            }
+
+            Socket client = serverSocket.accept();
+            String clientAddress = client.getInetAddress().getHostAddress();
+            Log.i(TAG, "Server: connection done");
+
+            InputStream inputstream = client.getInputStream();
+            String message = convertStreamToString(inputstream);
+            client.close();
+
+            if (returnMeta) {
+              WritableMap map = Arguments.createMap();
+              map.putString("message", message);
+              map.putString("fromAddress", clientAddress);
+              callback.invoke(map);
             } else {
-              this.returnMeta = false;
+              callback.invoke(message);
             }
 
-            while (!Thread.currentThread().isInterrupted()) {
-              Socket client = serverSocket.accept();
-              String clientAddress = client.getInetAddress().getHostAddress();
-              Log.i(TAG, "Server: connection done");
-
-              InputStream inputstream = client.getInputStream();
-              String message = convertStreamToString(inputstream);
-              client.close();
-
-              if (returnMeta) {
-                WritableMap map = Arguments.createMap();
-                map.putString("message", message);
-                map.putString("fromAddress", clientAddress);
-                callback.invoke(map);
-              } else {
-                callback.invoke(message);
-              }
-
-              this.stop();
-            }
+            this.stop();
           } catch (IOException e) {
             Log.e(TAG, e.getMessage());
           }
@@ -83,8 +71,6 @@ public class MessageServer {
     if (serverSocket != null) {
       try {
         serverSocket.close();
-        this.callback = null;
-        this.returnMeta = false;
         Log.i(TAG, "Server: Socket closed");
       } catch (IOException e) {
         Log.e(TAG, e.getMessage());
